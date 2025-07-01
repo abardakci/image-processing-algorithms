@@ -1,18 +1,18 @@
 #include "basic_filters.hpp"
 
-int clamp(int val, int low, int high) 
+int clamp(int val, int low, int high)
 {
     return std::max(low, std::min(val, high));
 }
 
-cv::Mat histogramEqualization(cv::Mat& input)
+cv::Mat histogramEqualization(cv::Mat &input)
 {
     CV_Assert(input.type() == CV_8UC1); // Gri seviye kontrolü
 
     cv::Mat hist;
-    const int hist_size = 256;        // 0-255
-    float range[] = { 0, 256 }; // 256 dış sınır
-    const float* histRange = { range };
+    const int hist_size = 256; // 0-255
+    float range[] = {0, 256};  // 256 dış sınır
+    const float *histRange = {range};
 
     cv::calcHist(&input, 1, 0, cv::Mat(), hist, 1, &hist_size, &histRange);
 
@@ -23,7 +23,7 @@ cv::Mat histogramEqualization(cv::Mat& input)
 
     for (int i = 1; i < hist_size; ++i)
     {
-        hist.at<float>(i) += hist.at<float>(i - 1); 
+        hist.at<float>(i) += hist.at<float>(i - 1);
     }
 
     cv::Mat lut(1, hist_size, CV_8U);
@@ -48,15 +48,15 @@ cv::Mat histogramEqualization(cv::Mat& input)
     return output;
 }
 
-cv::Mat boxFilter(cv::Mat& input, const int filter_size)
+cv::Mat boxFilter(cv::Mat &input, const int filter_size)
 {
-    int flow = filter_size / 2;  
+    int flow = filter_size / 2;
 
     int h = input.rows;
     int w = input.cols;
     int hw = h * w;
 
-    cv::Mat dst(cv::Size(w,h), input.type());
+    cv::Mat dst(cv::Size(w, h), input.type());
 
     int filter_area = filter_size * filter_size;
 
@@ -83,7 +83,7 @@ cv::Mat boxFilter(cv::Mat& input, const int filter_size)
     {
         for (int j = 0; j < w; ++j)
         {
-            bool i_con = i >= flow && i < h-flow;
+            bool i_con = i >= flow && i < h - flow;
             bool j_con = j == flow;
             if (i_con && j_con)
             {
@@ -108,14 +108,14 @@ cv::Mat boxFilter(cv::Mat& input, const int filter_size)
     return dst;
 }
 
-cv::Mat boxFilterV2(cv::Mat& input, const int filter_size)
+cv::Mat boxFilterV2(cv::Mat &input, const int filter_size)
 {
-    int overflow = filter_size / 2;  
+    int overflow = filter_size / 2;
 
     int h = input.rows;
     int w = input.cols;
 
-    cv::Mat dst(cv::Size(w,h), input.type());
+    cv::Mat dst(cv::Size(w, h), input.type());
 
     int filter_area = filter_size * 1;
     for (int i = 0; i < h; ++i)
@@ -126,7 +126,7 @@ cv::Mat boxFilterV2(cv::Mat& input, const int filter_size)
             for (int m = 0; m < filter_size; ++m)
             {
                 input.at<uchar>(offset_i + m, j);
-            }   
+            }
 
             dst.at<uchar>(i, j) = -1;
         }
@@ -135,7 +135,7 @@ cv::Mat boxFilterV2(cv::Mat& input, const int filter_size)
     return dst;
 }
 
-cv::Mat medianFilter(cv::Mat& input, const int filter_size)
+cv::Mat medianFilter(cv::Mat &input, const int filter_size)
 {
     return input;
 }

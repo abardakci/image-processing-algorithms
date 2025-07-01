@@ -6,10 +6,11 @@
 
 // x: col
 // y: row
-class xylab : public cv::Vec<float, 5> {
+class xylab : public cv::Vec<float, 5>
+{
 public:
     // Constructors
-    xylab(float val) : cv::Vec<float, 5>() 
+    xylab(float val) : cv::Vec<float, 5>()
     {
         (*this)[0] = val;
         (*this)[1] = val;
@@ -18,7 +19,7 @@ public:
         (*this)[4] = val;
     }
 
-    xylab(float x, float y, float l, float a, float b) 
+    xylab(float x, float y, float l, float a, float b)
     {
         (*this)[0] = x;
         (*this)[1] = y;
@@ -40,7 +41,6 @@ public:
     void setL(float val) { (*this)[2] = val; }
     void setA(float val) { (*this)[3] = val; }
     void setB(float val) { (*this)[4] = val; }
-
 };
 
 class Centroid
@@ -50,17 +50,16 @@ public:
     Centroid(xylab m, int id) : xylab_(m), label_(id) {}
 
     xylab xylab_;
-	int label_;
+    int label_;
 };
 
 class PixelCtx
 {
 public:
-	PixelCtx(int size);
+    PixelCtx(int size);
 
-	std::vector<int> labels_;
-	std::vector<float> distances_;
-
+    std::vector<int> labels_;
+    std::vector<float> distances_;
 };
 
-cv::Mat SLIC(const cv::Mat& input, int num_sp, float T, const int kMaxIterNum);
+cv::Mat SLIC(const cv::Mat &input, int num_sp, float T, const int kMaxIterNum);

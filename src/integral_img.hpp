@@ -2,14 +2,14 @@
 #include <algorithm>
 #include <opencv2/opencv.hpp>
 
-void convert_to_integral_image(cv::Mat& input)
+void convert_to_integral_image(cv::Mat &input)
 {
 	cv::Mat output;
 
 	int w = input.cols;
 	int h = input.rows;
 
-	float* ptr = input.ptr<float>();
+	float *ptr = input.ptr<float>();
 
 	for (int j = 1; j < w; ++j)
 	{
