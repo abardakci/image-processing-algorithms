@@ -3,6 +3,8 @@
 
 #include <opencv2/opencv.hpp>
 
+using timer = std::chrono::steady_clock;
+
 class CLAHE
 {
 public:
