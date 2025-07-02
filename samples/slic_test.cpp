@@ -15,13 +15,13 @@ const string output_path = "/home/alper/code-repo/image_processing_cpp/outputs/"
 const int max_width = 1280;
 const int max_height = 720;
 
-int main()
+int main(int argc, char** argv)
 {
-    cv::Mat input = cv::imread(assets_path + "lee.jpg");
+    const int num_sp = stoi(argv[1]);
+    const float threshold = stof(argv[2]);
+    string img_name = argv[3];
 
-    const int num_sp = 100;
-    const int threshold = 0.01f;
-
+    cv::Mat input = cv::imread(assets_path + img_name);
     cv::Mat output = SLIC(input, num_sp, threshold, 10);
 
     while (true)

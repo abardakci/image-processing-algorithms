@@ -78,9 +78,7 @@ static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 static float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, float x2_val)
 {
 	float sum = dist_x1 + dist_x2;
-	float interpolated_value = (dist_x1 / sum) * x2_val + (dist_x2 / sum) * x1_val;
-
-	return interpolated_value;
+	return (dist_x1 / sum) * x2_val + (dist_x2 / sum) * x1_val;
 }
 
 static inline float clamp(float input, float min, float max)
@@ -138,11 +136,12 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 		}
 	}
 
+	float* cdata = channels[2].ptr<float>();
 	for (int i = tile_size / 2; i < input_final.rows - tile_size / 2; i++)
 	{
 		for (int j = tile_size / 2; j < input_final.cols - tile_size / 2; j++)
 		{
-			int v = std::min(255, static_cast<int>(channels[2].at<float>(i, j) * 255.0f));
+			int v = static_cast<int>(cdata[i*input_final.cols+j] * 255.0f);
 
 			int i_tile = (i - tile_size / 2) / tile_size;
 			int j_tile = (j - tile_size / 2) / tile_size;
@@ -161,7 +160,7 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 			float v2 = lineer_interpolation(dj_left, dj_right, c3, c4);
 			float vlast = lineer_interpolation(di_up, di_bottom, v1, v2);
 
-			channels[2].ptr<float>()[i*input_final.cols + j] = clamp(vlast, 0.0f, 1.0f);
+			cdata[i*input_final.cols + j] = vlast;
 		}
 	}
 
