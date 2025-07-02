@@ -12,9 +12,12 @@ using timer = std::chrono::steady_clock;
 const string assets_path = "/home/alper/code-repo/image_processing_cpp/assets/";
 const string output_path = "/home/alper/code-repo/image_processing_cpp/outputs/";
 
+const int max_width = 1280;
+const int max_height = 720;
+
 int main()
 {
-    cv::Mat input = cv::imread(assets_path + "len_full.jpg");
+    cv::Mat input = cv::imread(assets_path + "lee.jpg");
 
     const int num_sp = 100;
     const int threshold = 0.01f;
@@ -24,9 +27,13 @@ int main()
     while (true)
     {
         cv::Mat display = output.clone();
-    
+                
+        double scale_w = (double)max_width / display.cols;
+        double scale_h = (double)max_height / display.rows;
+
+        double scale = std::min(scale_w, scale_h);
         cv::imshow("CV", display);
-        
+
         if (cv::waitKey(0) == 'q')
             break;
     }

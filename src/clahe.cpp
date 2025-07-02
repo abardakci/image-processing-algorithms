@@ -4,43 +4,39 @@ CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static void histogram(cv::Mat &v_channel)
+static std::vector<float> histogram(cv::Mat &channel)
 {
-	CV_Assert(v_channel.type() == CV_32F);
+	CV_Assert(channel.type() == CV_32F);
 
 	cv::Mat hist;
 	const int hist_size = 256;
 	float range[] = {0.0f, 1.0f};
 	const float *histRange = {range};
 
-	cv::calcHist(&v_channel, 1, 0, cv::Mat(), hist, 1, &hist_size, &histRange);
+	cv::calcHist(&channel, 1, 0, cv::Mat(), hist, 1, &hist_size, &histRange);
 
 	// normalize to PDF
-	hist /= v_channel.total();
+	hist /= channel.total();
 
-	// CDF hesapla
+	// CDF
+	std::vector<float> lut(hist_size);
+	lut[0] = 0.0f;
 	for (int i = 1; i < hist_size; ++i)
 	{
 		hist.at<float>(i) += hist.at<float>(i - 1);
+		lut[i] = hist.at<float>(i);
 	}
 
-	// CDF LUT
-	std::vector<float> lut(hist_size);
-	for (int i = 0; i < hist_size; ++i)
-	{
-		lut[i] = hist.at<float>(i); // ∈ [0, 1]
-	}
+	// overwrite channel
+	return lut;
+}
 
-	// eşitleme uygula
-	for (int i = 0; i < v_channel.rows; ++i)
-	{
-		for (int j = 0; j < v_channel.cols; ++j)
-		{
-			float val = v_channel.at<float>(i, j);
-			int bin = std::min(int(val * 255.0f), 255);
-			v_channel.at<float>(i, j) = lut[bin];
-		}
-	}
+static float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, float x2_val)
+{
+	float sum = dist_x1 + dist_x2;
+	float interpolated_value = (dist_x1 / sum) * x2_val + (dist_x2 / sum) * x1_val;
+
+	return interpolated_value;
 }
 
 cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
@@ -48,32 +44,63 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 	m_height = input.rows;
 	m_width = input.cols;
 
-	// 1. Normalize and convert to HSV
-	cv::Mat input_normalized, input_hsv;
+	// normalize & conversion to lab
+	cv::Mat input_normalized, input_lab;
 	input.convertTo(input_normalized, CV_32F, 1.0f / 255.0f);
-	cv::cvtColor(input_normalized, input_hsv, cv::COLOR_BGR2HSV);
+	cv::cvtColor(input_normalized, input_lab, cv::COLOR_BGR2Lab);
 
-	// 2. HSV kanallarına ayır
-	std::vector<cv::Mat> hsv_channels;
-	cv::split(input_hsv, hsv_channels); // hsv_channels[2] = V
+	// get lab channels
+	std::vector<cv::Mat> channels;
+	cv::split(input_lab, channels);
 
-	// 3. Tile tile V kanalına eşitleme uygula
-	for (int i = 0; i < m_height; i += tile_size)
+	const int tile_num = m_height / tile_size;
+
+	std::vector<std::vector<float>> tile_luts(tile_num * tile_num);
+
+	// get transformation luts for each tile
+	for (int i = 0; i < tile_num; i++)
 	{
-		for (int j = 0; j < m_width; j += tile_size)
+		for (int j = 0; j < tile_num; j++)
 		{
-			cv::Rect roi(j, i, tile_size, tile_size);
+			cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
 
-			cv::Mat v_tile = hsv_channels[2](roi);
-			histogram(v_tile); // doğrudan değiştirme
+			cv::Mat v_tile = channels[0](roi);
+			tile_luts[i * tile_num + j] = histogram(v_tile);
 		}
 	}
 
-	// 4. HSV'yi yeniden birleştirip BGR’ye dön
-	cv::merge(hsv_channels, input_hsv);
+	for (int i = tile_size / 2; i < m_height - tile_size / 2; i++)
+	{
+		for (int j = tile_size / 2; j < m_width - tile_size / 2; j++)
+		{
+			int v = std::min(255, static_cast<int>(channels[0].at<float>(i, j) * 255.0f));
 
+			int i_tile = (i - (tile_size / 2)) / tile_size;
+			int j_tile = (j - (tile_size / 2)) / tile_size;
+
+			int di_up = i - (i_tile * tile_size + tile_size / 2);
+			int di_bottom = tile_size - di_up;
+			int dj_left = j - (j_tile * tile_size + tile_size / 2);
+			int dj_right = tile_size - dj_left;
+
+			float c1 = tile_luts[i_tile * tile_num + j_tile][v];
+			float c2 = tile_luts[i_tile * tile_num + j_tile + 1][v];
+			float c3 = tile_luts[(i_tile + 1) * tile_num + j_tile][v];
+			float c4 = tile_luts[(i_tile + 1) * tile_num + j_tile + 1][v];
+
+			float v1 = lineer_interpolation(dj_left, dj_right, c1, c2);
+			float v2 = lineer_interpolation(dj_left, dj_right, c3, c4);
+			float vlast = lineer_interpolation(di_up, di_bottom, v1, v2);
+
+			channels[0].at<float>(i, j) = vlast;
+		}
+	}
+
+	cv::merge(channels, input_lab);
+
+	// re-convert to bgr & de-normalize
 	cv::Mat output_bgr;
-	cv::cvtColor(input_hsv, output_bgr, cv::COLOR_HSV2BGR);
+	cv::cvtColor(input_lab, output_bgr, cv::COLOR_Lab2BGR);
 	output_bgr.convertTo(output_bgr, CV_8U, 255.0);
 
 	return output_bgr;
