@@ -4,30 +4,63 @@ CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static std::vector<float> histogram(cv::Mat &channel)
+static std::vector<int> calcHist(cv::Mat& channel, float begin, float end, int bin_size)
+{
+    CV_Assert(channel.type() == CV_32F);
+
+    std::vector<int> hist(bin_size, 0);
+    float step = (end - begin) / bin_size;
+
+    int total = channel.rows * channel.cols;
+    const float* data = (float*)channel.data;
+
+    for (int i = 0; i < total; ++i)
+    {
+        float val = data[i];
+        int idx = static_cast<int>((val - begin) / step);
+        if (idx >= 0 && idx < bin_size)
+        {
+            ++hist[idx];
+        }
+    }
+
+    return hist;
+}
+
+static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 {
 	CV_Assert(channel.type() == CV_32F);
 
-	cv::Mat hist;
-	const int hist_size = 256;
-	float range[] = {0.0f, 1.0f};
-	const float *histRange = {range};
+    const int hist_size = 256;
 
-	cv::calcHist(&channel, 1, 0, cv::Mat(), hist, 1, &hist_size, &histRange);
+	std::vector<int> hist_int = calcHist(channel, 0.0f, 1.0f, 256);
 
+	std::vector<float> pdf(hist_size);
+	
 	// normalize to PDF
-	hist /= channel.total();
+	for (int i = 0; i < hist_size; ++i)
+	{
+		pdf[i] = (float)hist_int[i] / (float)channel.total(); 
+	}
+
+    // for (int i = 0; i < pdf.size(); ++i)
+    // {
+    //     float &h = pdf[i];
+    //     if (h > clip_threshold)
+    //     {
+	// 		h = clip_threshold;      
+    //     }
+    // }
 
 	// CDF
 	std::vector<float> lut(hist_size);
-	lut[0] = 0.0f;
+	lut[0] = pdf[0];
 	for (int i = 1; i < hist_size; ++i)
 	{
-		hist.at<float>(i) += hist.at<float>(i - 1);
-		lut[i] = hist.at<float>(i);
+		pdf[i] += pdf[i - 1];
+		lut[i] = pdf[i];
 	}
 
-	// overwrite channel
 	return lut;
 }
 
@@ -39,19 +72,30 @@ static float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, fl
 	return interpolated_value;
 }
 
+static inline float clamp(float input, float min, float max)
+{
+	if (input < min)
+		return min;
+
+	if (input > max)
+		return max;
+
+	return input;
+}
+
 cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
 {
 	m_height = input.rows;
 	m_width = input.cols;
+	m_clip_threshold = clip_threshold;
 
-	// normalize & conversion to lab
-	cv::Mat input_normalized, input_lab;
-	input.convertTo(input_normalized, CV_32F, 1.0f / 255.0f);
-	cv::cvtColor(input_normalized, input_lab, cv::COLOR_BGR2Lab);
+	cv::Mat input_flt, input_hsv;
+	input.convertTo(input_flt, CV_32F, 1.0f / 255.0f);
+	cv::cvtColor(input_flt, input_hsv, cv::COLOR_BGR2HSV);
 
-	// get lab channels
+	// get hsv channels
 	std::vector<cv::Mat> channels;
-	cv::split(input_lab, channels);
+	cv::split(input_hsv, channels);
 
 	const int tile_num = m_height / tile_size;
 
@@ -64,8 +108,8 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 		{
 			cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
 
-			cv::Mat v_tile = channels[0](roi);
-			tile_luts[i * tile_num + j] = histogram(v_tile);
+			cv::Mat v_tile = channels[2](roi);
+			tile_luts[i * tile_num + j] = histogram(v_tile, m_clip_threshold);
 		}
 	}
 
@@ -73,7 +117,7 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 	{
 		for (int j = tile_size / 2; j < m_width - tile_size / 2; j++)
 		{
-			int v = std::min(255, static_cast<int>(channels[0].at<float>(i, j) * 255.0f));
+			int v = std::min(255, static_cast<int>(channels[2].at<float>(i, j) * 255.0f));
 
 			int i_tile = (i - (tile_size / 2)) / tile_size;
 			int j_tile = (j - (tile_size / 2)) / tile_size;
@@ -92,16 +136,16 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 			float v2 = lineer_interpolation(dj_left, dj_right, c3, c4);
 			float vlast = lineer_interpolation(di_up, di_bottom, v1, v2);
 
-			channels[0].at<float>(i, j) = vlast;
+			channels[2].at<float>(i, j) = clamp(vlast, 0.0f, 1.0f);		
 		}
 	}
 
-	cv::merge(channels, input_lab);
+	cv::merge(channels, input_hsv);
 
-	// re-convert to bgr & de-normalize
-	cv::Mat output_bgr;
-	cv::cvtColor(input_lab, output_bgr, cv::COLOR_Lab2BGR);
-	output_bgr.convertTo(output_bgr, CV_8U, 255.0);
+	// re-convert to bgr
+	cv::Mat output_bgr, output_u8;
+	cv::cvtColor(input_hsv, output_bgr, cv::COLOR_HSV2BGR);
+	output_bgr.convertTo(output_u8, CV_8U, 255);
 
-	return output_bgr;
+	return output_u8;
 }
