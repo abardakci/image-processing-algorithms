@@ -1,29 +1,21 @@
 #include "clahe.hpp"
 
-// fix getting only square images
-// add histogram clipping
-// cover edges & corners
-
 CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static std::vector<int> calcHist(cv::Mat &channel, float begin, float end, int bin_size)
+static std::vector<int> calcHist(cv::Mat &channel, int bin_size)
 {
-	CV_Assert(channel.type() == CV_32F);
+	CV_Assert(channel.type() == CV_8U);
 
 	std::vector<int> hist(bin_size, 0);
-	float step = (end - begin) / bin_size;
 
 	int total = channel.rows * channel.cols;
-	const float *data = (float *)channel.data;
 
+	const uint8_t *data = channel.data; // channel.data zaten uint8_t*
 	for (int i = 0; i < total; ++i)
 	{
-		float val = data[i];
-		int idx = static_cast<int>((val - begin) / step);
-		assert(idx >= 0 && idx < bin_size);
-		++hist[idx];
+		++hist[data[i]];
 	}
 
 	return hist;
@@ -31,11 +23,11 @@ static std::vector<int> calcHist(cv::Mat &channel, float begin, float end, int b
 
 static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 {
-	CV_Assert(channel.type() == CV_32F);
+	CV_Assert(channel.type() == CV_8U && channel.isContinuous());
 
 	const int hist_size = 256;
 
-	std::vector<int> hist_int = calcHist(channel, 0.0f, 1.0f, 256);
+	std::vector<int> hist_int = calcHist(channel, 256);
 
 	std::vector<float> pdf(hist_size);
 
@@ -46,6 +38,7 @@ static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 		pdf[i] = (float)hist_int[i] / total;
 	}
 
+	// clip
 	float acc = 0.0f;
 	for (int i = 0; i < pdf.size(); ++i)
 	{
@@ -57,30 +50,19 @@ static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 		}
 	}
 
+	// redistribute
 	float dist = acc / pdf.size();
 	for (int i = 0; i < pdf.size(); ++i)
 	{
 		pdf[i] += dist;
 	}
 
-	float sum = 0.0f;
-	for (float f : pdf)
-	{
-		sum += f;
-	}
-
-	for (float& f: pdf)
-	{
-		f /= sum;
-	}
-
-	// CDF
-	std::vector<float> lut(hist_size);
+	// CDF look-up table (lut)
+	std::vector<float> lut(hist_size, 0.0f);
 	lut[0] = pdf[0];
 	for (int i = 1; i < hist_size; ++i)
 	{
-		pdf[i] += pdf[i - 1];
-		lut[i] = pdf[i];
+		lut[i] += lut[i - 1] + pdf[i];
 	}
 
 	return lut;
@@ -109,10 +91,6 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 	m_width = input.cols;
 	m_clip_threshold = clip_threshold;
 
-	cv::Mat input_flt, input_hsv;
-	input.convertTo(input_flt, CV_32F, 1.0f / 255.0f);
-	cv::cvtColor(input_flt, input_hsv, cv::COLOR_BGR2HSV);
-
 	int wpad = tile_size - (m_width % tile_size);
 	int left = wpad / 2;
 	int right = wpad - left;
@@ -121,19 +99,14 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 	int top = hpad / 2;
 	int down = hpad - top;
 
-	cv::Mat input_final(cv::Size(m_width + wpad, m_height + hpad), input_hsv.type());
-	cv::copyMakeBorder(input_hsv, input_final, top, down, left, right, CV_HAL_BORDER_REFLECT_101);
+	cv::Mat inputb(cv::Size(m_width + wpad, m_height + hpad), input.type());
+	cv::copyMakeBorder(input, inputb, top, down, left, right, CV_HAL_BORDER_REFLECT_101);
 
-	// get hsv channels
-	std::vector<cv::Mat> channels;
-	cv::split(input_final, channels);
+	const int wtile_num = inputb.cols / tile_size;
+	const int htile_num = inputb.rows / tile_size;
 
-	auto t1 = timer::now();
-	
-	const int wtile_num = input_final.cols / tile_size;
-	const int htile_num = input_final.rows / tile_size;
-
-	std::vector<std::vector<float>> tile_luts(wtile_num * htile_num);
+	const int hist_size = 256;
+	std::vector<float> tile_luts(wtile_num * htile_num * hist_size);
 
 	// get transformation luts for each tile
 	for (int i = 0; i < htile_num; i++)
@@ -142,17 +115,19 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 		{
 			cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
 
-			cv::Mat v_tile = channels[2](roi);
-			tile_luts[i * wtile_num + j] = histogram(v_tile, m_clip_threshold);
+			cv::Mat v_tile = inputb(roi);
+			tile_luts[i * wtile_num * hist_size + j * hist_] = histogram(v_tile, m_clip_threshold);
 		}
 	}
 
-	float* cdata = channels[2].ptr<float>();
-	for (int i = tile_size / 2; i < input_final.rows - tile_size / 2; i++)
+	uint8_t *cdata = inputb.data;
+	const int inputw = inputb.cols;
+	for (int i = tile_size / 2; i < inputb.rows - tile_size / 2; i++)
 	{
-		for (int j = tile_size / 2; j < input_final.cols - tile_size / 2; j++)
+		for (int j = tile_size / 2; j < inputw - tile_size / 2; j++)
 		{
-			int v = static_cast<int>(cdata[i*input_final.cols+j] * 255.0f);
+			const int idx = i * inputw + j;
+			int v = static_cast<int>(cdata[idx]);
 
 			int i_tile = (i - tile_size / 2) / tile_size;
 			int j_tile = (j - tile_size / 2) / tile_size;
@@ -171,20 +146,10 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 			float v2 = lineer_interpolation(dj_left, dj_right, c3, c4);
 			float vlast = lineer_interpolation(di_up, di_bottom, v1, v2);
 
-			cdata[i*input_final.cols + j] = vlast;
+			cdata[idx] = static_cast<uint8_t>(vlast * 255.0f);
 		}
 	}
 
-	auto t2 = timer::now();
-    std::cout << "my inner clahe time:" << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() << "\n";
-
-	cv::merge(channels, input_final);
-
-	// re-convert to bgr
-	cv::Mat output_bgr, output_u8;
-	cv::cvtColor(input_final, output_bgr, cv::COLOR_HSV2BGR);
-	output_bgr.convertTo(output_u8, CV_8U, 255);
-
 	cv::Rect original_roi(left, top, m_width, m_height);
-	return output_u8(original_roi);
+	return inputb(original_roi);
 }
