@@ -63,6 +63,17 @@ static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 		pdf[i] += dist;
 	}
 
+	float sum = 0.0f;
+	for (float f : pdf)
+	{
+		sum += f;
+	}
+
+	for (float& f: pdf)
+	{
+		f /= sum;
+	}
+
 	// CDF
 	std::vector<float> lut(hist_size);
 	lut[0] = pdf[0];
