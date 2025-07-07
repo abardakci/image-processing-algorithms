@@ -4,45 +4,45 @@ CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static std::vector<int> calcHist(cv::Mat &channel, int bin_size)
+static cv::Mat calcHist(cv::Mat &channel, int bin_size)
 {
 	CV_Assert(channel.type() == CV_8U);
 
-	std::vector<int> hist(bin_size, 0);
+	cv::Mat hist(cv::Size(bin_size, 1), CV_32S);
+	hist = 0;
 
-	int total = channel.rows * channel.cols;
+	int total = channel.total();
 
 	const uint8_t *data = channel.data; // channel.data zaten uint8_t*
+	int *histptr = hist.ptr<int>();
 	for (int i = 0; i < total; ++i)
 	{
-		++hist[data[i]];
+		int idx = static_cast<int>(data[i]);
+		++histptr[idx];
 	}
 
 	return hist;
 }
 
-static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
+static void histogram(cv::Mat &channel, float clip_threshold, float *lut)
 {
-	CV_Assert(channel.type() == CV_8U && channel.isContinuous());
+	CV_Assert(channel.type() == CV_8U);
 
 	const int hist_size = 256;
 
-	std::vector<int> hist_int = calcHist(channel, 256);
-
-	std::vector<float> pdf(hist_size);
+	cv::Mat hist = calcHist(channel, hist_size);
+	cv::Mat pdf(cv::Size(hist_size, 1), CV_32F);
 
 	// normalize to PDF
-	int total = channel.total();
-	for (int i = 0; i < hist_size; ++i)
-	{
-		pdf[i] = (float)hist_int[i] / total;
-	}
+	const int total = channel.total();
+	hist.convertTo(pdf, CV_32F, 1.0 / total); // tek satırda hem çevir hem normalize
 
 	// clip
 	float acc = 0.0f;
-	for (int i = 0; i < pdf.size(); ++i)
+	float *pdfptr = pdf.ptr<float>();
+	for (int i = 0; i < hist_size; ++i)
 	{
-		float &h = pdf[i];
+		float &h = pdfptr[i];
 		if (h > clip_threshold)
 		{
 			acc += h - clip_threshold;
@@ -51,21 +51,15 @@ static std::vector<float> histogram(cv::Mat &channel, float clip_threshold)
 	}
 
 	// redistribute
-	float dist = acc / pdf.size();
-	for (int i = 0; i < pdf.size(); ++i)
-	{
-		pdf[i] += dist;
-	}
+	float dist = acc / hist_size;
+	pdf += dist;
 
 	// CDF look-up table (lut)
-	std::vector<float> lut(hist_size, 0.0f);
-	lut[0] = pdf[0];
+	lut[0] = pdfptr[0];
 	for (int i = 1; i < hist_size; ++i)
 	{
-		lut[i] += lut[i - 1] + pdf[i];
+		lut[i] = lut[i - 1] + pdfptr[i];
 	}
-
-	return lut;
 }
 
 static float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, float x2_val)
@@ -87,6 +81,8 @@ static inline float clamp(float input, float min, float max)
 
 cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
 {
+	CV_Assert(input.type() == CV_8U);
+
 	m_height = input.rows;
 	m_width = input.cols;
 	m_clip_threshold = clip_threshold;
