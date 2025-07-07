@@ -25,6 +25,11 @@ int main(int argc, char** argv)
     cv::Mat input = cv::imread(assets_path + "noisyImage_Gaussian.jpg", cv::IMREAD_GRAYSCALE);
     input.convertTo(input, CV_32F);
     cv::Mat output = nlm.apply(input, patch, window, t);
+    
+    cv::Mat dst;
+    cv::Mat src = cv::imread(assets_path + "noisyImage_Gaussian.jpg", cv::IMREAD_GRAYSCALE);
+    fastNlMeansDenoising(src, dst, t, patch, window);
+    cv::imwrite(output_path + "gaussian_opencv_nlm.jpg", dst);
 
     while (true)
     {

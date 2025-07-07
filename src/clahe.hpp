@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <vector>
 
@@ -11,7 +13,7 @@ public:
 	CLAHE();
 	~CLAHE();
 
-	cv::Mat apply(const cv::Mat &input, const int tile_size, float clip_threshold);
+	void apply(const cv::Mat &input, const int tile_size, float clip_threshold);
 
 private:
 	int m_height;

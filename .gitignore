@@ -1,3 +1,6 @@
 out*
 .vscode
 assets*
+python/images*
+python/*.png
+python/*.jpg

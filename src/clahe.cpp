@@ -4,43 +4,41 @@ CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static void histogram(cv::Mat &channel, float clip_threshold, float *lut)
+static void histogram(const cv::Mat &channel, float clip_threshold, float *lut)
 {
 	CV_Assert(channel.type() == CV_8U);
-
+	
 	const int hist_size = 256;
-	const int csize = channel.total();
+	const float range[] = {0.f, 256.f};
+	const float* hist_range = range;
 
-	std::array<float, hist_size> pdf_arr{0};
-	const uint8_t *cdata = channel.ptr<uint8_t>();
+	// OpenCV histogram (CV_32F)
+	cv::Mat hist;
+	cv::calcHist(&channel, 1, 0, cv::Mat(), hist, 1, &hist_size, &hist_range, true, false);
+	float *h = hist.ptr<float>(); 
 
-	cv::Mat pdf(1, hist_size, CV_32F, &pdf_arr);
-	for (int i = 0; i < csize; ++i)
-	{
-		++pdf_arr[cdata[i]];
-	}
-
-	pdf /= csize;
+	// normalize to PDF (divide by total pixel count)
+	hist /= static_cast<float>(channel.total());
 
 	// clip
 	float acc = 0.0f;
 	for (int i = 0; i < hist_size; ++i)
 	{
-		float &h = pdf_arr[i];
-		float excess = std::max(h - clip_threshold, 0.0f);
+		float excess = std::max(h[i] - clip_threshold, 0.0f);
 		acc += excess;
-		h -= excess;
+		h[i] -= excess;
 	}
 
 	// redistribute
 	float dist = acc / hist_size;
-	pdf += dist;
+	for (int i = 0; i < hist_size; ++i)
+		h[i] += dist;
 
 	// CDF look-up table (lut)
-	lut[0] = pdf_arr[0];
+	lut[0] = h[0];
 	for (int i = 1; i < hist_size; ++i)
 	{
-		lut[i] = lut[i - 1] + pdf_arr[i];
+		lut[i] = lut[i - 1] + h[i];
 	}
 }
 
@@ -50,58 +48,60 @@ static inline float lineer_interpolation(float dist_x1, float dist_x2, float x1_
 	return (dist_x1 / sum) * x2_val + (dist_x2 / sum) * x1_val;
 }
 
-cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
+void CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
 {
-	CV_Assert(input.type() == CV_8U);
+	CV_Assert(input.type() == CV_8U && input.isContinuous() && !input.empty());
 
 	m_height = input.rows;
 	m_width = input.cols;
 	m_clip_threshold = clip_threshold;
 
-	int wpad = tile_size - (m_width % tile_size);
-	int left = wpad / 2;
-	int right = wpad - left;
-
-	int hpad = tile_size - (m_height % tile_size);
-	int top = hpad / 2;
-	int down = hpad - top;
-
-	cv::Mat inputb(cv::Size(m_width + wpad, m_height + hpad), input.type());
-	cv::copyMakeBorder(input, inputb, top, down, left, right, CV_HAL_BORDER_REFLECT_101);
-
-	const int wtile_num = inputb.cols / tile_size;
-	const int htile_num = inputb.rows / tile_size;
-
+	const int wtile_num = m_width / tile_size;
+	const int htile_num = m_height / tile_size;
 	const int hist_size = 256;
+
+	auto t1 = timer::now();
 	std::vector<float> tile_luts(wtile_num * htile_num * hist_size);
 
 	// get transformation luts for each tile
-	for (int i = 0; i < htile_num; i++)
-	{
-		for (int j = 0; j < wtile_num; j++)
-		{
-			cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
 
-			cv::Mat v_tile = inputb(roi);
-			histogram(v_tile, m_clip_threshold, &tile_luts[(i * wtile_num + j) * hist_size]);
-		}
-	}
-
-	uint8_t *cdata = inputb.data;
-	const int inputw = inputb.cols;
-	for (int i = tile_size / 2; i < inputb.rows - tile_size / 2; i++)
+	#pragma omp parallel for
+	for (int index = 0; index < htile_num * wtile_num; ++index)
 	{
-		for (int j = tile_size / 2; j < inputw - tile_size / 2; j++)
+		int i = index / wtile_num;
+		int j = index % wtile_num;
+
+		cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
+		cv::Mat v_tile = input(roi);
+
+		histogram(v_tile, m_clip_threshold, &tile_luts[index * hist_size]);
+	}	
+
+    auto t2 = timer::now();
+    std::cout << "histogram loop: " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "\n";
+
+	uint8_t *cdata = input.data;
+	
+	t1 = timer::now();
+
+	const int tdiv2 = tile_size / 2;
+	const int edge_i = m_width - tdiv2;
+	const int edge_j = m_width - tdiv2;
+	
+	#pragma omp parallel for
+	for (int i = tdiv2; i < edge_i; i++)
+	{
+		for (int j = tdiv2; j < edge_j; j++)
 		{
-			const int idx = i * inputw + j;
+			const int idx = i * m_width + j;
 			int v = static_cast<int>(cdata[idx]);
 
-			int i_tile = (i - tile_size / 2) / tile_size;
-			int j_tile = (j - tile_size / 2) / tile_size;
+			int i_tile = (i - tdiv2) / tile_size;
+			int j_tile = (j - tdiv2) / tile_size;
 
-			int di_up = i - (i_tile * tile_size + tile_size / 2);
+			int di_up = i - (i_tile * tile_size + tdiv2);
 			int di_bottom = tile_size - di_up;
-			int dj_left = j - (j_tile * tile_size + tile_size / 2);
+			int dj_left = j - (j_tile * tile_size + tdiv2);
 			int dj_right = tile_size - dj_left;
 
 			float c1 = tile_luts[(i_tile * wtile_num + j_tile) * hist_size + v];
@@ -117,6 +117,6 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 		}
 	}
 
-	cv::Rect original_roi(left, top, m_width, m_height);
-	return inputb(original_roi);
+	t2 = timer::now();
+    std::cout << "interpolation loop: " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << "\n";
 }
