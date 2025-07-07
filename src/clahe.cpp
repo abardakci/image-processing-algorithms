@@ -4,50 +4,32 @@ CLAHE::CLAHE() {}
 
 CLAHE::~CLAHE() {}
 
-static cv::Mat calcHist(cv::Mat &channel, int bin_size)
-{
-	CV_Assert(channel.type() == CV_8U);
-
-	cv::Mat hist(cv::Size(bin_size, 1), CV_32S);
-	hist = 0;
-
-	int total = channel.total();
-
-	const uint8_t *data = channel.data; // channel.data zaten uint8_t*
-	int *histptr = hist.ptr<int>();
-	for (int i = 0; i < total; ++i)
-	{
-		int idx = static_cast<int>(data[i]);
-		++histptr[idx];
-	}
-
-	return hist;
-}
-
 static void histogram(cv::Mat &channel, float clip_threshold, float *lut)
 {
 	CV_Assert(channel.type() == CV_8U);
 
 	const int hist_size = 256;
+	const int csize = channel.total();
 
-	cv::Mat hist = calcHist(channel, hist_size);
-	cv::Mat pdf(cv::Size(hist_size, 1), CV_32F);
+	std::array<float, hist_size> pdf_arr{0};
+	const uint8_t *cdata = channel.ptr<uint8_t>();
 
-	// normalize to PDF
-	const int total = channel.total();
-	hist.convertTo(pdf, CV_32F, 1.0 / total); // tek satırda hem çevir hem normalize
+	cv::Mat pdf(1, hist_size, CV_32F, &pdf_arr);
+	for (int i = 0; i < csize; ++i)
+	{
+		++pdf_arr[cdata[i]];
+	}
+
+	pdf /= csize;
 
 	// clip
 	float acc = 0.0f;
-	float *pdfptr = pdf.ptr<float>();
 	for (int i = 0; i < hist_size; ++i)
 	{
-		float &h = pdfptr[i];
-		if (h > clip_threshold)
-		{
-			acc += h - clip_threshold;
-			h = clip_threshold;
-		}
+		float &h = pdf_arr[i];
+		float excess = std::max(h - clip_threshold, 0.0f);
+		acc += excess;
+		h -= excess;
 	}
 
 	// redistribute
@@ -55,28 +37,17 @@ static void histogram(cv::Mat &channel, float clip_threshold, float *lut)
 	pdf += dist;
 
 	// CDF look-up table (lut)
-	lut[0] = pdfptr[0];
+	lut[0] = pdf_arr[0];
 	for (int i = 1; i < hist_size; ++i)
 	{
-		lut[i] = lut[i - 1] + pdfptr[i];
+		lut[i] = lut[i - 1] + pdf_arr[i];
 	}
 }
 
-static float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, float x2_val)
+static inline float lineer_interpolation(float dist_x1, float dist_x2, float x1_val, float x2_val)
 {
 	float sum = dist_x1 + dist_x2;
 	return (dist_x1 / sum) * x2_val + (dist_x2 / sum) * x1_val;
-}
-
-static inline float clamp(float input, float min, float max)
-{
-	if (input < min)
-		return min;
-
-	if (input > max)
-		return max;
-
-	return input;
 }
 
 cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_threshold)
@@ -112,7 +83,7 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 			cv::Rect roi(j * tile_size, i * tile_size, tile_size, tile_size);
 
 			cv::Mat v_tile = inputb(roi);
-			tile_luts[i * wtile_num * hist_size + j * hist_] = histogram(v_tile, m_clip_threshold);
+			histogram(v_tile, m_clip_threshold, &tile_luts[(i * wtile_num + j) * hist_size]);
 		}
 	}
 
@@ -133,10 +104,10 @@ cv::Mat CLAHE::apply(const cv::Mat &input, const int tile_size, float clip_thres
 			int dj_left = j - (j_tile * tile_size + tile_size / 2);
 			int dj_right = tile_size - dj_left;
 
-			float c1 = tile_luts[i_tile * wtile_num + j_tile][v];
-			float c2 = tile_luts[i_tile * wtile_num + j_tile + 1][v];
-			float c3 = tile_luts[(i_tile + 1) * wtile_num + j_tile][v];
-			float c4 = tile_luts[(i_tile + 1) * wtile_num + j_tile + 1][v];
+			float c1 = tile_luts[(i_tile * wtile_num + j_tile) * hist_size + v];
+			float c2 = tile_luts[(i_tile * wtile_num + j_tile + 1) * hist_size + v];
+			float c3 = tile_luts[((i_tile + 1) * wtile_num + j_tile) * hist_size + v];
+			float c4 = tile_luts[((i_tile + 1) * wtile_num + j_tile + 1) * hist_size + v];
 
 			float v1 = lineer_interpolation(dj_left, dj_right, c1, c2);
 			float v2 = lineer_interpolation(dj_left, dj_right, c3, c4);
