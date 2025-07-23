@@ -1,9 +1,5 @@
 #include "nlm.hpp"
 
-// fix getting only square images
-// add histogram clipping
-// cover edges & corners
-
 NLM::NLM() {}
 
 NLM::~NLM() {}
@@ -25,6 +21,7 @@ cv::Mat NLM::apply(const cv::Mat &input, const int patch_size, const int window_
 
     int padded_cols = padded.cols;
     float *data = padded.ptr<float>();
+    float *output_ptr = output.ptr<float>();
     for (int i = pad; i < pad + m_height; ++i)
     {
         for (int j = pad; j < pad + m_width; ++j)
@@ -54,7 +51,7 @@ cv::Mat NLM::apply(const cv::Mat &input, const int patch_size, const int window_
                 }
             }
 
-            output.ptr<float>()[ij] = denoised_pixel / W;
+            output_ptr[ij] = denoised_pixel / W;
         }
     }
 

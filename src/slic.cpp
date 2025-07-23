@@ -1,5 +1,4 @@
 #include "slic.hpp"
-#include <xmmintrin.h>
 
 static constexpr float INF = std::numeric_limits<float>::max();
 
@@ -19,11 +18,12 @@ static float distance(xylab &p1, xylab &p2, float dcm, float dsm)
 	return D;
 }
 
-static void assignSamples(const cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx, int S)
+static void assignSamples(cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx, int S)
 {
 	const int w = img.cols;
 	const int h = img.rows;
 
+	cv::Vec3f *ptr = img.ptr<cv::Vec3f>();
 	for (auto &centroid : centers)
 	{
 		for (int i = -S; i <= S; ++i)
@@ -43,7 +43,7 @@ static void assignSamples(const cv::Mat &img, std::vector<Centroid> &centers, Pi
 
 				int pixel_offset = row_offset * w + col_offset;
 
-				cv::Vec3f lab = img.at<cv::Vec3f>(row_offset, col_offset);
+				cv::Vec3f lab = ptr[row_offset * w + col_offset];
 				xylab current_pixel(col_offset, row_offset, lab[0], lab[1], lab[2]);
 
 				float current_distance = distance(centroid.xylab_, current_pixel, 20.0f, S);
@@ -58,7 +58,7 @@ static void assignSamples(const cv::Mat &img, std::vector<Centroid> &centers, Pi
 	}
 }
 
-static void updateCentroids(const cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx)
+static void updateCentroids(cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx)
 {
 	const int w = img.cols;
 	const int h = img.rows;
@@ -68,27 +68,27 @@ static void updateCentroids(const cv::Mat &img, std::vector<Centroid> &centers, 
 	std::vector<int> C(sp_num, 0);
 	std::vector<xylab> z(sp_num, 0.0f);
 
-	for (auto &centroid : centers)
+	cv::Vec3f *ptr = img.ptr<cv::Vec3f>();
+
+	for (int i = 0; i < h; ++i)
 	{
-		for (int i = 0; i < h; ++i)
+		for (int j = 0; j < w; ++j)
 		{
-			for (int j = 0; j < w; ++j)
-			{
-				int offset = i * w + j;
-				int idx = pixel_ctx.labels_[offset];
+			int offset = i * w + j;
+			int idx = pixel_ctx.labels_[offset];
 
-				C[idx] += 1;
+			C[idx] += 1;
 
-				z[idx].setL(z[idx].L() + img.at<cv::Vec3f>(i, j)[0]);
-				z[idx].setA(z[idx].A() + img.at<cv::Vec3f>(i, j)[1]);
-				z[idx].setB(z[idx].B() + img.at<cv::Vec3f>(i, j)[2]);
-				z[idx].setX(z[idx].x() + j);
-				z[idx].setY(z[idx].y() + i);
-			}
+			z[idx].setL(z[idx].L() + ptr[i * w + j][0]);
+			z[idx].setA(z[idx].A() + ptr[i * w + j][1]);
+			z[idx].setB(z[idx].B() + ptr[i * w + j][2]);
+			z[idx].setX(z[idx].x() + j);
+			z[idx].setY(z[idx].y() + i);
 		}
 	}
 
-	for (int i = 0; i < z.size(); ++i)
+	int zsize = z.size(); 
+	for (int i = 0; i < zsize; ++i)
 	{
 		z[i] /= C[i];
 		centers[i].xylab_ = z[i];
@@ -103,14 +103,15 @@ static cv::Mat postprocess(const cv::Mat &input, std::vector<Centroid> &centers,
 	assert(input.type() == CV_32FC3);
 	cv::Mat output(cv::Size(w, h), input.type());
 
+	cv::Vec3f *out = output.ptr<cv::Vec3f>();
 	for (int i = 0; i < h; ++i)
 	{
 		for (int j = 0; j < w; ++j)
 		{
 			int label = pixel_ctx.labels_[i * w + j];
-			output.at<cv::Vec3f>(i, j)[0] = centers[label].xylab_.L();
-			output.at<cv::Vec3f>(i, j)[1] = centers[label].xylab_.A();
-			output.at<cv::Vec3f>(i, j)[2] = centers[label].xylab_.B();
+			out[i * w + j][0] = centers[label].xylab_.L();
+			out[i * w + j][1] = centers[label].xylab_.A();
+			out[i * w + j][2] = centers[label].xylab_.B();
 		}
 	}
 
@@ -139,11 +140,12 @@ cv::Mat SLIC(const cv::Mat &input, int num_sp, float T, const int max_iter)
 	PixelCtx pixel_ctx(num_pixels);
 
 	// initialize centroids
+	cv::Vec3f *lab = lab_img.ptr<cv::Vec3f>();
 	for (int y = S / 2, id = 0; y < h; y += S)
 	{
 		for (int x = S / 2; x < w; x += S)
 		{
-			const cv::Vec3f &lab_pixel = lab_img.at<cv::Vec3f>(y, x);
+			const cv::Vec3f &lab_pixel = lab[y * w + x];
 			centers.emplace_back(xylab(x, y, lab_pixel[0], lab_pixel[1], lab_pixel[2]), id++);
 		}
 	}
@@ -157,7 +159,7 @@ cv::Mat SLIC(const cv::Mat &input, int num_sp, float T, const int max_iter)
 		// update centroids
 		updateCentroids(lab_img, centers, pixel_ctx);
 
-	} while (iter++ < max_iter); // test for convergence
+	} while (iter++ < max_iter); // test for convergence (not yet implemented)
 
 	// postprocess image
 	output = postprocess(lab_img, centers, pixel_ctx);

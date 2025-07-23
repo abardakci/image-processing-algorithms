@@ -29,8 +29,6 @@ cv::Mat histogramEqualization(cv::Mat &input)
 
     cv::Mat output(cv::Size(w, h), CV_8UC1);
 
-    // cv::LUT(input, lut, output);
-
     for (int i = 0; i < h; ++i)
     {
         for (int j = 0; j < w; ++j)
