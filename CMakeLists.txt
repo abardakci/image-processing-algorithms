@@ -21,3 +21,6 @@ add_executable(nlm "${CMAKE_SOURCE_DIR}/samples/nlm_test.cpp" ${SRC})
 target_link_libraries(nlm PRIVATE ${OpenCV_LIBS} )
 target_include_directories(nlm PRIVATE ${OpenCV_INCLUDE_DIRS} )
 
+add_executable(adaptive_filters "${CMAKE_SOURCE_DIR}/samples/adaptive_filters.cpp" ${SRC})
+target_link_libraries(adaptive_filters PRIVATE ${OpenCV_LIBS} )
+target_include_directories(adaptive_filters PRIVATE ${OpenCV_INCLUDE_DIRS} )

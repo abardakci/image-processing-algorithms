@@ -4,3 +4,6 @@ assets*
 python/images*
 python/*.png
 python/*.jpg
+*.out
+perf*
+python*

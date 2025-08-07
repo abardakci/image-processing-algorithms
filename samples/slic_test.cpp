@@ -21,8 +21,10 @@ int main(int argc, char** argv)
     const float threshold = stof(argv[2]);
     string img_name = argv[3];
 
+    SLIC slic;
+
     cv::Mat input = cv::imread(assets_path + img_name);
-    cv::Mat output = SLIC(input, num_sp, threshold, 10);
+    cv::Mat output = slic.apply(input, num_sp, threshold, 10);
 
     while (true)
     {

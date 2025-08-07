@@ -64,4 +64,18 @@ public:
     std::vector<float> distances_;
 };
 
-cv::Mat SLIC(const cv::Mat &input, int num_sp, float T, const int kMaxIterNum);
+class SLIC
+{
+public:
+    SLIC();
+    cv::Mat apply(cv::Mat &input, int num_sp, float T, const int kMaxIterNum = 10);
+
+private:
+    void assignSamples(cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx, int S);
+    void updateCentroids(cv::Mat &img, std::vector<Centroid> &centers, PixelCtx &pixel_ctx);
+    cv::Mat postprocess(const cv::Mat &input, std::vector<Centroid> &centers, PixelCtx &pixel_ctx);
+
+private:
+    int m_width;
+    int m_height;
+};
